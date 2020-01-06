@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  KeyName:
+    Description: "Name of an existing EC2 KeyPair to enable SSH access to the instance"
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: "my_new_key"
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IGW
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a
+      VpcId: !Ref VPC
+      CidrBlock: 172.31.16.0/24
+      MapPublicIpOnLaunch: true
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1b
+      VpcId: !Ref VPC
+      CidrBlock: 172.31.32.0/24
+      MapPublicIpOnLaunch: false
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+  PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "Internet Group"
+      GroupDescription: "SSH traffic in, all traffic out."
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+  Databasesubnetgroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupName: "dbsubnetgroup"
+      DBSubnetGroupDescription: "description"
+      SubnetIds:
+        - !Ref PrivateSubnet
+      Tags:
+        - Key: "Name"
+          Value: "SQLDatabase"          
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: "ami-0ce933e2ae91880d3"
+      InstanceType: "t2.micro"
+      SecurityGroupIds:
+        - !GetAtt SecurityGroup.GroupId
+      KeyName: !Ref KeyName
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: "Name"
+          Value: "WebServer"
+  RDSInstance:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      AllocatedStorage: "100"
+      DBInstanceClass: "db.t2.micro"
+      Engine: "MySQL"
+      Iops: "1000"
+      MasterUsername: "admin"
+      MasterUserPassword: "admin123"
+      DBSubnetGroupName: "Dbsubnetgroup"
+    DependsOn: "Databasesubnetgroup"
+  NatInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: "ami-00b3aa8a93dd09c13"
+      InstanceType: "t2.micro"
+      SourceDestCheck: false
+    Tags:
+      - Key: Name
+        Value: NAT1 instance
+    KeyName: !Ref KeyName
+    NetworkInterfaces:
+      - SubnetId: !Ref PublicSubnet
+      AssociatePublicIpAddress: true
+      DeviceIndex: 0  
